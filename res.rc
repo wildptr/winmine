@@ -1,0 +1,58 @@
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+410                     BITMAP                  "data/410.bmp"
+420                     BITMAP                  "data/420.bmp"
+430                     BITMAP                  "data/430.bmp"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+100                     ICON                    "data/1.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// WAVE
+//
+
+432                     WAVE                    "data/432.wav"
+433                     WAVE                    "data/433.wav"
+434                     WAVE                    "data/434.wav"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Menu
+//
+
+500 MENU
+BEGIN
+    POPUP "&Game"
+    BEGIN
+        MENUITEM "&New\tF2",                    510
+        MENUITEM SEPARATOR
+        MENUITEM "&Beginner",                   521
+        MENUITEM "&Intermediate",               522
+        MENUITEM "&Expert",                     523
+        MENUITEM "&Custom...",                  524
+        MENUITEM SEPARATOR
+        MENUITEM "&Sound",                      526
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit",                       512
+    END
+END
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Accelerators
+//
+
+501 ACCELERATORS
+{
+	0x71 /*VK_F2*/, 510, VIRTKEY
+}
