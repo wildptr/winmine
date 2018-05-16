@@ -1028,16 +1028,6 @@ init_graphics(void)
 	}
 	ReleaseDC(main_window, dc);
 
-	/* load digits */
-	res = FindResource(the_instance, (LPCTSTR) 420, (LPCTSTR) RT_BITMAP);
-	digit_bmpdata = (uchar *) LoadResource(the_instance, res);
-	offset = 0x68;
-	stride = sprite_stride(13, 23);
-	for (i=0; i<12; i++) {
-		digit_bmpdata_offset[i] = offset;
-		offset += stride;
-	}
-
 	shade_pen = CreatePen(0, 1, 0x808080);
 }
 
@@ -1061,6 +1051,16 @@ load_graphics(void)
 				  0, 0, 0, 16,
 				  tile_bmpdata + offset,
 				  (BITMAPINFO *) tile_bmpdata, 0);
+		offset += stride;
+	}
+
+	/* load digits */
+	res = FindResource(the_instance, (LPCTSTR) 420, (LPCTSTR) RT_BITMAP);
+	digit_bmpdata = (uchar *) LoadResource(the_instance, res);
+	offset = 0x68;
+	stride = sprite_stride(13, 23);
+	for (i=0; i<12; i++) {
+		digit_bmpdata_offset[i] = offset;
 		offset += stride;
 	}
 
