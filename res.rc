@@ -4,8 +4,10 @@
 //
 
 410                     BITMAP                  "data/410.bmp"
+411                     BITMAP                  "data/411.bmp"
 420                     BITMAP                  "data/420.bmp"
 430                     BITMAP                  "data/430.bmp"
+431                     BITMAP                  "data/431.bmp"
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -42,6 +44,11 @@ BEGIN
         MENUITEM "&Custom...",                  524
         MENUITEM SEPARATOR
         MENUITEM "&Sound",                      526
+	POPUP "&Theme"
+	BEGIN
+	    MENUITEM "Windows 9x",              527
+	    MENUITEM "Windows 2000/XP",         528
+	END
         MENUITEM SEPARATOR
         MENUITEM "E&xit",                       512
     END

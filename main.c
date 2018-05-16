@@ -6,6 +6,11 @@
 
 typedef unsigned char uchar;
 
+enum {
+	THEME_WIN9X,
+	THEME_WIN2K,
+};
+
 const TCHAR appname[] = TEXT("Minesweeper");
 const struct {
 	int height;
@@ -28,6 +33,7 @@ int cxborder1;
 int view_width, view_height;
 HGDIOBJ shade_pen;
 HDC tile_dc[16];
+uchar *tile_bmpdata;
 uchar *digit_bmpdata;
 int digit_bmpdata_offset[12];
 uchar *face_bmpdata;
@@ -44,6 +50,7 @@ int minectr;
 int time_elapsed;
 int face_state;
 int qend;
+int theme;
 
 uchar game_state;
 uchar ticking;
@@ -60,6 +67,7 @@ uchar board[N][N];
 int floodfillx[QUEUE_SIZE], floodfilly[QUEUE_SIZE];
 
 void init_graphics(void);
+void load_graphics(void);
 void reveal_board(uchar);
 void open_safe_tile(int x, int y);
 int count_flags_around(int x, int y);
@@ -336,6 +344,8 @@ check_menu_items(void)
 	check_menu_item(523, board_type == 2);
 	check_menu_item(524, board_type == 3);
 	check_menu_item(526, sound);
+	check_menu_item(527, theme == THEME_WIN9X);
+	check_menu_item(528, theme == THEME_WIN2K);
 }
 
 void
@@ -791,6 +801,7 @@ wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
 	switch (msg) {
 		PAINTSTRUCT ps;
+		int cmd;
 	case WM_DESTROY:
 		KillTimer(hwnd, 1);
 		PostQuitMessage(0);
@@ -876,7 +887,8 @@ release_mouse:
 		tick();
 		return 0;
 	case WM_COMMAND:
-		switch (LOWORD(wparam)) {
+		cmd = LOWORD(wparam);
+		switch (cmd) {
 		case 510:
 			new_game();
 			break;
@@ -886,7 +898,7 @@ release_mouse:
 		case 521:
 		case 522:
 		case 523:
-			set_board_type(wparam-521);
+			set_board_type(cmd-521);
 			new_game();
 config_changed:
 			check_menu_items();
@@ -898,6 +910,12 @@ config_changed:
 				}
 				sound = 0;
 			}
+			goto config_changed;
+		case 527:
+		case 528:
+			theme = cmd-527;
+			load_graphics();
+			InvalidateRect(hwnd, 0, 0);
 			goto config_changed;
 		}
 		return 0;
@@ -932,6 +950,7 @@ load_config(void)
 {
 	set_board_type(2);
 	sound = stop_sounds();
+	theme = THEME_WIN2K;
 }
 
 int APIENTRY
@@ -971,6 +990,7 @@ WinMain(HINSTANCE instance, HINSTANCE _p, LPSTR cmdline, int show)
 	main_window = hwnd;
 	update_window(1);
 	init_graphics();
+	load_graphics();
 	update_menu();
 	new_game();
 	ShowWindow(hwnd, 1);
@@ -996,11 +1016,6 @@ sprite_stride(int w, int h)
 void
 init_graphics(void)
 {
-	HRSRC res =
-		FindResource(the_instance, (LPCTSTR) 410, (LPCTSTR) RT_BITMAP);
-	uchar *bmp_data = (uchar *) LoadResource(the_instance, res);
-	int stride = sprite_stride(16, 16);
-	int offset = 0x68;
 	int i;
 	HDC dc = GetDC(main_window);
 	for (i=0; i<16; i++) {
@@ -1010,15 +1025,10 @@ init_graphics(void)
 		tile_dc[i] = compat_dc;
 		compat_bmp = CreateCompatibleBitmap(dc, 16, 16);
 		SelectObject(compat_dc, compat_bmp);
-		SetDIBitsToDevice(compat_dc,
-				  0, 0, 16, 16,
-				  0, 0, 0, 16,
-				  bmp_data + offset,
-				  (BITMAPINFO *) bmp_data, 0);
-		offset += stride;
 	}
 	ReleaseDC(main_window, dc);
 
+	/* load digits */
 	res = FindResource(the_instance, (LPCTSTR) 420, (LPCTSTR) RT_BITMAP);
 	digit_bmpdata = (uchar *) LoadResource(the_instance, res);
 	offset = 0x68;
@@ -1028,7 +1038,35 @@ init_graphics(void)
 		offset += stride;
 	}
 
-	res = FindResource(the_instance, (LPCTSTR) 430, (LPCTSTR) RT_BITMAP);
+	shade_pen = CreatePen(0, 1, 0x808080);
+}
+
+void
+load_graphics(void)
+{
+	HRSRC res;
+	int stride;
+	int offset;
+	int i;
+
+	/* load tiles */
+	res = FindResource(the_instance, (LPCTSTR)(410+theme),
+			   (LPCTSTR) RT_BITMAP);
+	tile_bmpdata = (uchar *) LoadResource(the_instance, res);
+	stride = sprite_stride(16, 16);
+	offset = 0x68;
+	for (i=0; i<16; i++) {
+		SetDIBitsToDevice(tile_dc[i],
+				  0, 0, 16, 16,
+				  0, 0, 0, 16,
+				  tile_bmpdata + offset,
+				  (BITMAPINFO *) tile_bmpdata, 0);
+		offset += stride;
+	}
+
+	/* load faces */
+	res = FindResource(the_instance, (LPCTSTR)(430+theme),
+			   (LPCTSTR) RT_BITMAP);
 	face_bmpdata = (uchar *) LoadResource(the_instance, res);
 	offset = 0x68;
 	stride = sprite_stride(24, 24);
@@ -1036,6 +1074,4 @@ init_graphics(void)
 		face_bmpdata_offset[i] = offset;
 		offset += stride;
 	}
-
-	shade_pen = CreatePen(0, 1, 0x808080);
 }
