@@ -49,6 +49,7 @@ BEGIN
 	    MENUITEM "Windows 9x",              527
 	    MENUITEM "Windows 2000/XP",         528
 	END
+	MENUITEM "S&olver",                     529
         MENUITEM SEPARATOR
         MENUITEM "E&xit",                       512
     END

@@ -1,8 +1,9 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
 
 #define N 32
-#define QUEUE_SIZE 100
+#define QUEUE_SIZE 256
 
 typedef unsigned char uchar;
 
@@ -17,7 +18,7 @@ const struct {
 	int width;
 	int num_mines;
 } board_config[3] = {
-	{9,9,10},
+	{ 9, 9,10},
 	{16,16,40},
 	{16,30,99},
 };
@@ -31,6 +32,7 @@ int cymenu1;
 int cyborder1;
 int cxborder1;
 int view_width, view_height;
+
 HGDIOBJ shade_pen;
 HDC tile_dc[16];
 uchar *tile_bmpdata;
@@ -55,6 +57,7 @@ int theme;
 uchar game_state;
 uchar ticking;
 uchar sound;
+uchar solver_enabled;
 
 uchar mouse_captured;
 uchar midbutton_down;
@@ -64,15 +67,19 @@ uchar window_hidden;
 
 uchar board[N][N];
 
-int floodfillx[QUEUE_SIZE], floodfilly[QUEUE_SIZE];
+typedef struct {
+	uchar x, y;
+} Point;
+
+Point floodfillqueue[QUEUE_SIZE];
 
 void init_graphics(void);
 void load_graphics(void);
 void reveal_board(uchar);
 void open_safe_tile(int x, int y);
+void open_safe_tile_ui(int x, int y);
 int count_flags_around(int x, int y);
 void end_game(uchar won);
-void update_tile(int x, int y, uchar t);
 
 void
 select_pen(HDC dc, uchar style)
@@ -242,13 +249,6 @@ paint_mine_counter_getdc(void)
 	ReleaseDC(main_window, dc);
 }
 
-void
-inc_mine_counter(int a1)
-{
-	minectr += a1;
-	paint_mine_counter_getdc();
-}
-
 #if 0
 int
 sub_1001915(int sm)
@@ -325,7 +325,7 @@ new_game(void)
 	num_opened_tiles = 0;
 	num_safe_tiles = boardw * boardh - num_mines;
 	game_state = 1;
-	inc_mine_counter(0);
+	paint_mine_counter_getdc();
 	update_window(6);
 }
 
@@ -346,6 +346,7 @@ check_menu_items(void)
 	check_menu_item(526, sound);
 	check_menu_item(527, theme == THEME_WIN9X);
 	check_menu_item(528, theme == THEME_WIN2K);
+	check_menu_item(529, solver_enabled);
 }
 
 void
@@ -515,7 +516,7 @@ slide_on_tile(int x, int y)
 }
 
 void
-flag_tile(int x, int y)
+toggle_flag(int x, int y)
 {
 	if (x > 0 && y > 0 && x <= boardw && y <= boardh) {
 		uchar t = board[y][x];
@@ -524,16 +525,17 @@ flag_tile(int x, int y)
 			uchar newt;
 			if (v1 == 14) {
 				newt = 15;
-				inc_mine_counter(1);
-			} else if (v1 == 13) {
-				newt = 15;
-			} else {
+				minectr++;
+			} else if (v1 == 15) {
 				newt = 14;
-				inc_mine_counter(-1);
+				minectr--;
 			}
-			update_tile(x, y, newt);
+			paint_mine_counter_getdc();
+			board[y][x] = (t&0xe0)|newt;
 			if (v1 == 14 && num_opened_tiles == num_safe_tiles) {
 				end_game(1);
+			} else {
+				paint_tile(x, y);
 			}
 		}
 	}
@@ -555,14 +557,6 @@ paint_timer_getdc(void)
 }
 
 void
-update_tile(int x, int y, uchar a3)
-{
-	uchar t = board[y][x];
-	board[y][x] = (board[y][x]&0xe0)|a3;
-	paint_tile(x, y);
-}
-
-void
 end_game(uchar won)
 {
 	ticking = 0;
@@ -570,7 +564,8 @@ end_game(uchar won)
 	paint_face_getdc(face_state);
 	reveal_board(won?14:10);
 	if (won && minectr) {
-		inc_mine_counter(-minectr);
+		minectr = 0;
+		paint_mine_counter_getdc();
 	}
 	play_sound(won?2:3);
 	game_state = 0;
@@ -579,26 +574,17 @@ end_game(uchar won)
 void
 middle_click(int x, int y)
 {
-	uchar v7 = 0;
 	uchar t = board[y][x];
 	int i, j;
 	if ((t&0x40) && (t&0x1f) == count_flags_around(x, y)) {
-		for (i=y-1; i<=y+1; i++) {
-			for (j=x-1; j<=x+1; j++) {
-				t = board[i][j];
-				if ((t&0x1f) == 14 || !(t&0x80)) {
-					open_safe_tile(j, i);
-				} else {
-					v7 = 1;
-					update_tile(j, i, 0x4c);
-				}
-			}
-		}
-		if (v7) {
-			end_game(0);
-		} else {
-			if (num_opened_tiles == num_safe_tiles) {
-				end_game(1);
+		for (i=y-1; i<=y+1; i++) for (j=x-1; j<=x+1; j++) {
+			t = board[i][j];
+			if ((t&0x80) && (t&0x1f) != 14) {
+				board[i][j] = (t&0xe0)|0x4c;
+				end_game(0);
+			} else {
+				open_safe_tile_ui(j, i);
+				if (!game_state) return;
 			}
 		}
 	} else {
@@ -617,27 +603,20 @@ paint_board_getdc(void)
 void
 reveal_board(uchar a1)
 {
-	if (boardh >= 1) {
-		int i = 1;
-		int j = 1;
-		for (;;) {
-			uchar t = board[i][j];
-			if (!(t&0x40)) {
-				uchar v6 = t&0x1f;
-				if (t&0x80) {
-					if (v6 != 14) {
-						board[i][j] = (t&0xe0)|a1;
-					}
-				} else {
-					if (v6 == 14) {
-						/* flagged non-mine */
-						board[i][j] = (t&0xe0)|11;
-					}
+	int i, j;
+	for (i=1; i<=boardh; i++) for (j=1; j<=boardw; j++) {
+		uchar t = board[i][j];
+		if (!(t&0x40)) {
+			uchar v6 = t&0x1f;
+			if (t&0x80) {
+				if (v6 != 14) {
+					board[i][j] = (t&0xe0)|a1;
 				}
-			}
-			if (++j > boardw) {
-				if (++i > boardh) break;
-				j = 1;
+			} else {
+				if (v6 == 14) {
+					/* flagged non-mine */
+					board[i][j] = (t&0xe0)|11;
+				}
 			}
 		}
 	}
@@ -649,10 +628,8 @@ count_mines_around(int x, int y)
 {
 	int ret = 0;
 	int i, j;
-	for (i=y-1; i<=y+1; i++) {
-		for (j=x-1; j<=x+1; j++) {
-			if (board[i][j]&0x80) ret++;
-		}
+	for (i=y-1; i<=y+1; i++) for (j=x-1; j<=x+1; j++) {
+		if (board[i][j]&0x80) ret++;
 	}
 	return ret;
 }
@@ -662,10 +639,8 @@ count_flags_around(int x, int y)
 {
 	int ret = 0;
 	int i, j;
-	for (i=y-1; i<=y+1; i++) {
-		for (j=x-1; j<=x+1; j++) {
-			if ((board[i][j]&0x1f) == 14) ret++;
-		}
+	for (i=y-1; i<=y+1; i++) for (j=x-1; j<=x+1; j++) {
+		if ((board[i][j]&0x1f) == 14) ret++;
 	}
 	return ret;
 }
@@ -681,10 +656,9 @@ floodfill(int x, int y)
 			num_opened_tiles++;
 			nmine = count_mines_around(x, y);
 			board[y][x] = nmine | 0x40;
-			paint_tile(x, y);
 			if (nmine == 0) {
-				floodfillx[qend] = x;
-				floodfilly[qend] = y;
+				floodfillqueue[qend].x = x;
+				floodfillqueue[qend].y = y;
 				if (++qend == QUEUE_SIZE)
 					qend = 0;
 			}
@@ -695,13 +669,13 @@ floodfill(int x, int y)
 void
 open_safe_tile(int x, int y)
 {
-	int i = 1;
+	int k = 1;
 	qend = 1;
 	floodfill(x, y);
 	if (qend != 1) {
 		do {
-			int qx = floodfillx[i];
-			int qy = floodfilly[i];
+			int qx = floodfillqueue[k].x;
+			int qy = floodfillqueue[k].y;
 			floodfill(qx-1, qy-1);
 			floodfill(qx  , qy-1);
 			floodfill(qx+1, qy-1);
@@ -710,8 +684,87 @@ open_safe_tile(int x, int y)
 			floodfill(qx-1, qy+1);
 			floodfill(qx  , qy+1);
 			floodfill(qx+1, qy+1);
-			if (++i == QUEUE_SIZE) i = 0;
-		} while (i != qend);
+			if (++k == QUEUE_SIZE) k = 0;
+		} while (k != qend);
+	}
+}
+
+uchar
+is_unopened(uchar t)
+{
+	return !(t&0x40) && (t&0x1f) != 16;
+}
+
+void
+auto_solve(void)
+{
+	int i, j;
+	uchar changed;
+	for (;;) {
+		changed = 0;
+		/* place flags */
+		for (i=1; i<=boardh; i++) for (j=1; j<=boardw; j++) {
+			uchar t = board[i][j];
+			int nmine;
+			int unopened;
+			int ii, jj;
+			if (!(t&0x40)) continue;
+			nmine = t&15;
+			unopened = 0;
+			for (ii=i-1; ii<=i+1; ii++) for (jj=j-1; jj<=j+1; jj++) {
+				if (is_unopened(board[ii][jj])) unopened++;
+			}
+			if (nmine == unopened) {
+				for (ii=i-1; ii<=i+1; ii++) for (jj=j-1; jj<=j+1; jj++) {
+					uchar tt = board[ii][jj];
+					if (is_unopened(tt) && (tt&0x1f) != 14) {
+						board[ii][jj] = (board[ii][jj]&0xe0)|14;
+						minectr--;
+						changed = 1;
+					}
+				}
+			}
+		}
+		if (!changed) break;
+		/* open tiles */
+		for (i=1; i<=boardh; i++) for (j=1; j<=boardw; j++) {
+			uchar t = board[i][j];
+			int ii, jj;
+			if (!(t&0x40) || (t&0x1f) != count_flags_around(j, i)) continue;
+			for (ii=i-1; ii<=i+1; ii++) for (jj=j-1; jj<=j+1; jj++) {
+				uchar tt = board[ii][jj];
+				if (is_unopened(tt) && (tt&0x1f) != 14) {
+					if ((tt&0x80)) {
+						board[ii][jj] = (tt&0xe0)|0x4c;
+						end_game(0);
+						return;
+					}
+					open_safe_tile(jj, ii);
+					changed = 1;
+				}
+			}
+		}
+		if (!changed) break;
+	}
+}
+
+void
+open_safe_tile_ui(int x, int y)
+{
+	if (!(board[y][x]&0x40)) {
+		HDC dc = GetDC(main_window);
+		open_safe_tile(x, y);
+		if (solver_enabled) {
+			auto_solve();
+			paint_mine_counter(dc);
+			if (!game_state) return; /* lost */
+		}
+		if (num_opened_tiles == num_safe_tiles) {
+			end_game(1);
+		} else {
+			paint_board(dc);
+		}
+		ReleaseDC(main_window, dc);
 	}
 }
 
@@ -722,30 +775,26 @@ open_tile(int x, int y)
 	if (t&0x80) {
 		if (num_opened_tiles) {
 			/* BOOM! */
-			update_tile(x, y, 0x4c);
+			board[y][x] = (t&0xe0)|0x4c;
 			end_game(0);
 		} else {
 			/* hit a mine on first try... */
-			int i = 1;
-			int j = 1;
-			if (boardh > 1) {
-				while (board[i][j]&0x80) {
-					if (++j >= boardw) {
-						if (++i >= boardh) return;
-						j = 1;
-					}
-				}
+			int i, j;
+			for (i=1; i<=boardh; i++) for (j=1; j<=boardw; j++) {
+				if (!(board[i][j]&0x80)) break;
+			}
+			if (i <= boardh) {
 				board[y][x] = 15;
 				board[i][j] |= 0x80;
-				/* fix the one-click bug */
-				goto open;
+			} else {
+				/* unlikely but possible */
+				board[y][x] = 0x4c;
+				end_game(0);
 			}
 		}
-	} else {
-open:
-		open_safe_tile(x, y);
-		if (num_opened_tiles == num_safe_tiles)
-			end_game(1);
+	}
+	if (game_state) {
+		open_safe_tile_ui(x, y);
 	}
 }
 
@@ -761,7 +810,7 @@ sub_10037e1(void)
 				ticking = 1;
 				SetTimer(main_window, 1, 1000, 0);
 			}
-			if (!(game_state&1)) {
+			if (!game_state) {
 				lasty = -2;
 				lastx = -2;
 			}
@@ -815,7 +864,7 @@ wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			just_activated = 0;
 			return 0;
 		}
-		if (!(game_state&1)) break;
+		if (!game_state) break;
 		midbutton_down = 1;
 		goto capture_mouse;
 	case WM_LBUTTONDOWN:
@@ -825,7 +874,7 @@ wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		}
 		if (face_hittest(lparam))
 			return 0;
-		if (!(game_state&1)) break;
+		if (!game_state) break;
 		midbutton_down = (wparam&6) != 0;
 		goto capture_mouse;
 	case WM_LBUTTONUP:
@@ -839,7 +888,7 @@ wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 			just_activated = 0;
 			return 0;
 		}
-		if (!(game_state&1)) break;
+		if (!game_state) break;
 		if (mouse_captured) {
 			slide_on_tile(-3, -3);
 			midbutton_down = 1;
@@ -858,13 +907,13 @@ capture_mouse:
 		if (!in_menu_loop) {
 			int x = LOWORD(lparam);
 			int y = HIWORD(lparam);
-			flag_tile((x+4)>>4, (y-39)>>4);
+			toggle_flag((x+4)>>4, (y-39)>>4);
 		}
 		break;
 	case WM_MOUSEMOVE:
 mousemove:
 		if (mouse_captured) {
-			if (game_state&1) {
+			if (game_state) {
 				int x = LOWORD(lparam);
 				int y = HIWORD(lparam);
 				slide_on_tile((x+4)>>4, (y-39)>>4);
@@ -872,7 +921,7 @@ mousemove:
 release_mouse:
 				mouse_captured = 0;
 				ReleaseCapture();
-				if (game_state&1) {
+				if (game_state) {
 					sub_10037e1();
 				} else {
 					slide_on_tile(-2, -2);
@@ -917,6 +966,9 @@ config_changed:
 			load_graphics();
 			InvalidateRect(hwnd, 0, 0);
 			goto config_changed;
+		case 529:
+			solver_enabled = !solver_enabled;
+			goto config_changed;
 		}
 		return 0;
 	case WM_ENTERMENULOOP:
@@ -950,6 +1002,7 @@ load_config(void)
 {
 	set_board_type(2);
 	sound = stop_sounds();
+	solver_enabled = 1;
 	theme = THEME_WIN2K;
 }
 
