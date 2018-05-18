@@ -302,7 +302,7 @@ void
 place_mines(void)
 {
 	int n = num_mines;
-	do {
+	while (n) {
 		int y, x;
 		do {
 			y = randint(boardh)+1;
@@ -310,7 +310,7 @@ place_mines(void)
 		} while (board[y][x]&0x80);
 		board[y][x] |= 0x80;
 		n--;
-	} while (n);
+	}
 }
 
 void
@@ -718,14 +718,13 @@ auto_solve(void)
 				for (ii=i-1; ii<=i+1; ii++) for (jj=j-1; jj<=j+1; jj++) {
 					uchar tt = board[ii][jj];
 					if (is_unopened(tt) && (tt&0x1f) != 14) {
-						board[ii][jj] = (board[ii][jj]&0xe0)|14;
+						board[ii][jj] = (tt&0xe0)|14;
 						minectr--;
 						changed = 1;
 					}
 				}
 			}
 		}
-		if (!changed) break;
 		/* open tiles */
 		for (i=1; i<=boardh; i++) for (j=1; j<=boardw; j++) {
 			uchar t = board[i][j];
@@ -734,8 +733,8 @@ auto_solve(void)
 			for (ii=i-1; ii<=i+1; ii++) for (jj=j-1; jj<=j+1; jj++) {
 				uchar tt = board[ii][jj];
 				if (is_unopened(tt) && (tt&0x1f) != 14) {
-					if ((tt&0x80)) {
-						board[ii][jj] = (tt&0xe0)|0x4c;
+					if (tt&0x80) {
+						board[ii][jj] = 0xcc;
 						end_game(0);
 						return;
 					}
@@ -773,29 +772,24 @@ open_tile(int x, int y)
 {
 	uchar t = board[y][x];
 	if (t&0x80) {
-		if (num_opened_tiles) {
-			/* BOOM! */
-			board[y][x] = (t&0xe0)|0x4c;
-			end_game(0);
-		} else {
+		if (num_opened_tiles == 0) {
 			/* hit a mine on first try... */
 			int i, j;
 			for (i=1; i<=boardh; i++) for (j=1; j<=boardw; j++) {
-				if (!(board[i][j]&0x80)) break;
-			}
-			if (i <= boardh) {
-				board[y][x] = 15;
-				board[i][j] |= 0x80;
-			} else {
-				/* unlikely but possible */
-				board[y][x] = 0x4c;
-				end_game(0);
+				if (!(board[i][j]&0x80)) {
+					board[y][x] = 15;
+					board[i][j] |= 0x80;
+					goto open;
+				}
 			}
 		}
+		/* BOOM! */
+		board[y][x] = 0x4c;
+		end_game(0);
+		return;
 	}
-	if (game_state) {
-		open_safe_tile_ui(x, y);
-	}
+open:
+	open_safe_tile_ui(x, y);
 }
 
 void
@@ -843,6 +837,40 @@ set_board_type(int type)
 	boardh = board_config[type].height;
 	boardw = board_config[type].width;
 	num_mines = board_config[type].num_mines;
+}
+
+int
+sub_1003df6(HWND dlg, int itemid, int lo, int hi)
+{
+	int ret = GetDlgItemInt(dlg, itemid, &itemid, 0);
+	if (ret < lo) ret = lo;
+	else if (ret > hi) ret = hi;
+	return ret;
+}
+
+BOOL CALLBACK
+custom_field_dlgproc(HWND dlg, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+	switch (msg) {
+	case WM_INITDIALOG:
+		SetDlgItemInt(dlg, 141, boardh, 0);
+		SetDlgItemInt(dlg, 142, boardw, 0);
+		SetDlgItemInt(dlg, 143, num_mines, 0);
+		return 1;
+	case WM_COMMAND:
+		switch (wparam) {
+		case 1:
+			boardh = sub_1003df6(dlg, 141, 8, N-2);
+			boardw = sub_1003df6(dlg, 142, 8, N-2);
+			num_mines = sub_1003df6(dlg, 143, 0, min(boardh*boardw, 999));
+			/* fallthrough */
+		case 2:
+			EndDialog(dlg, 1);
+			return 1;
+		}
+		break;
+	}
+	return 0;
 }
 
 LRESULT CALLBACK
@@ -951,6 +979,13 @@ release_mouse:
 			new_game();
 config_changed:
 			check_menu_items();
+			break;
+		case 524:
+			DialogBoxParam(the_instance, (LPCTSTR) 80, hwnd,
+				       custom_field_dlgproc, 0);
+			board_type = 3;
+			check_menu_items();
+			new_game();
 			break;
 		case 526:
 			if (sound) {
