@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <windows.h>
 
-#define N 32
+#define N 64
 #define QUEUE_SIZE 256
 
 typedef unsigned char uchar;
@@ -58,6 +58,7 @@ uchar game_state;
 uchar ticking;
 uchar sound;
 uchar solver_enabled;
+uchar timer_enabled;
 
 uchar mouse_captured;
 uchar midbutton_down;
@@ -161,12 +162,18 @@ paint_timer(HDC dc)
 	int q, r;
 	int x;
 	if (layout&1) SetLayout(dc, 0);
-	q = time_elapsed/100;
-	r = time_elapsed%100;
 	x = view_width - cxborder1 - 56;
-	paint_digit(dc, x   , q);
-	paint_digit(dc, x+13, r/10);
-	paint_digit(dc, x+26, r%10);
+	if (timer_enabled) {
+		q = time_elapsed/100;
+		r = time_elapsed%100;
+		paint_digit(dc, x   , q);
+		paint_digit(dc, x+13, r/10);
+		paint_digit(dc, x+26, r%10);
+	} else {
+		paint_digit(dc, x   , 11);
+		paint_digit(dc, x+13, 11);
+		paint_digit(dc, x+26, 11);
+	}
 	if (layout&1) SetLayout(dc, layout);
 }
 
@@ -347,6 +354,7 @@ check_menu_items(void)
 	check_menu_item(527, theme == THEME_WIN9X);
 	check_menu_item(528, theme == THEME_WIN2K);
 	check_menu_item(529, solver_enabled);
+	check_menu_item(530, timer_enabled);
 }
 
 void
@@ -801,8 +809,10 @@ sub_10037e1(void)
 				play_sound(1);
 				time_elapsed++;
 				paint_timer_getdc();
-				ticking = 1;
-				SetTimer(main_window, 1, 1000, 0);
+				if (timer_enabled) {
+					ticking = 1;
+					SetTimer(main_window, 1, 1000, 0);
+				}
 			}
 			if (!game_state) {
 				lasty = -2;
@@ -840,7 +850,7 @@ set_board_type(int type)
 }
 
 int
-sub_1003df6(HWND dlg, int itemid, int lo, int hi)
+get_int_clamp(HWND dlg, int itemid, int lo, int hi)
 {
 	int ret = GetDlgItemInt(dlg, itemid, &itemid, 0);
 	if (ret < lo) ret = lo;
@@ -860,13 +870,14 @@ custom_field_dlgproc(HWND dlg, UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_COMMAND:
 		switch (wparam) {
 		case 1:
-			boardh = sub_1003df6(dlg, 141, 8, N-2);
-			boardw = sub_1003df6(dlg, 142, 8, N-2);
-			num_mines = sub_1003df6(dlg, 143, 0, min(boardh*boardw, 999));
-			/* fallthrough */
-		case 2:
+			boardh = get_int_clamp(dlg, 141, 8, N-2);
+			boardw = get_int_clamp(dlg, 142, 8, N-2);
+			num_mines = get_int_clamp(dlg, 143, 0, min(boardh*boardw, 999));
 			EndDialog(dlg, 1);
-			return 1;
+			return 0;
+		case 2:
+			EndDialog(dlg, 0);
+			return 0;
 		}
 		break;
 	}
@@ -981,11 +992,12 @@ config_changed:
 			check_menu_items();
 			break;
 		case 524:
-			DialogBoxParam(the_instance, (LPCTSTR) 80, hwnd,
-				       custom_field_dlgproc, 0);
-			board_type = 3;
-			check_menu_items();
-			new_game();
+			if (DialogBoxParam(the_instance, (LPCTSTR) 80, hwnd,
+					   custom_field_dlgproc, 0)) {
+				board_type = 3;
+				check_menu_items();
+				new_game();
+			}
 			break;
 		case 526:
 			if (sound) {
@@ -1003,6 +1015,15 @@ config_changed:
 			goto config_changed;
 		case 529:
 			solver_enabled = !solver_enabled;
+			goto config_changed;
+		case 530:
+			if (timer_enabled) {
+				timer_enabled = 0;
+				ticking = 0;
+			} else {
+				timer_enabled = 1;
+			}
+			paint_timer_getdc();
 			goto config_changed;
 		}
 		return 0;
